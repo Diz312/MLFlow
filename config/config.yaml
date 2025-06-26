@@ -1,0 +1,67 @@
+# Project Configuration
+project:
+  name: "QSR_Sales_Forecasting"
+  description: "Daily sales and guest count forecasting for QSR chain"
+  version: "1.0.0"
+
+# Data Configuration
+data:
+  dir: "data/"
+  sales_file: "qsr_daily_sales.csv"
+  store_metadata_file: "store_metadata.csv"
+  
+# Target Variables
+targets:
+  sales: "total_sales"
+  guests: "guest_count"
+
+# Model Configuration
+model:
+  random_state: 42
+  test_size: 0.2
+  validation_size: 0.2
+  
+  # Feature Engineering
+  features:
+    lag_days: [1, 7, 14, 30]
+    rolling_windows: [7, 14, 30]
+    seasonality: ["day_of_week", "month", "quarter"]
+    
+  # LightGBM Parameters
+  lightgbm:
+    objective: "regression"
+    metric: "rmse"
+    boosting_type: "gbdt"
+    num_leaves: 31
+    learning_rate: 0.05
+    feature_fraction: 0.9
+    bagging_fraction: 0.8
+    bagging_freq: 5
+    verbose: -1
+    n_estimators: 100
+
+# MLflow Configuration
+mlflow:
+  experiment_name: "QSR_Sales_Forecasting"
+  model_name: "QSR_LightGBM_Model"
+  tracking_uri: "sqlite:///mlflow.db"
+  artifact_location: "./mlruns"
+
+# Evaluation Metrics
+evaluation:
+  metrics: ["mae", "mse", "rmse", "mape", "r2"]
+  
+# Store Groupings
+store_groups:
+  size:
+    small: [800, 1400]    # baseline range for small stores
+    medium: [1400, 2000]  # baseline range for medium stores  
+    large: [2000, 2500]   # baseline range for large stores
+  type: ["Urban", "Suburban", "Highway", "Mall", "Airport"]
+  region: ["North", "South", "East", "West", "Central"]
+
+# Monitoring Configuration
+monitoring:
+  drift_threshold: 0.05
+  performance_threshold: 0.1
+  alert_email: "data-team@qsr-company.com"
