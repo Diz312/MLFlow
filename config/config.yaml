@@ -1,67 +1,267 @@
 # Project Configuration
 project:
   name: "QSR_Sales_Forecasting"
-  description: "Daily sales and guest count forecasting for QSR chain"
+  description: "Daily sales and guest count forecasting for QSR chain using Prophet"
   version: "1.0.0"
 
 # Data Configuration
 data:
   dir: "data/"
-  sales_file: "qsr_daily_sales.csv"
-  store_metadata_file: "store_metadata.csv"
+  
+  # Primary datasets
+  full_dataset: "qsr_daily_sales.csv"           # Complete 3-year dataset (2022-2024)
+  store_metadata: "store_metadata.csv"          # Store configurations and attributes
+  
+  # Model training/validation split
+  train_dataset: "qsr_train_2022_2023.csv"     # Training data: 2022-2023 (36,500 records)
+  validation_dataset: "qsr_validation_2024.csv" # Validation "actuals": 2024 (18,250 records)
+  
+  # Data characteristics
+  total_stores: 50
+  train_period: "2022-01-01 to 2023-12-31"     # 2 years for training
+  validation_period: "2024-01-01 to 2024-12-31" # 1 year for validation
   
 # Target Variables
 targets:
-  sales: "total_sales"
-  guests: "guest_count"
+  primary: "total_sales"    # Main forecasting target (revenue)
+  secondary: "guest_count"  # Secondary target (number of orders)
 
 # Model Configuration
 model:
   random_state: 42
-  test_size: 0.2
-  validation_size: 0.2
   
-  # Feature Engineering
-  features:
-    lag_days: [1, 7, 14, 30]
-    rolling_windows: [7, 14, 30]
-    seasonality: ["day_of_week", "month", "quarter"]
+  # Time-based splitting (no random splits for time series)
+  use_time_split: true
+  train_years: [2022, 2023]
+  validation_year: 2024
+  
+  # Prophet-specific parameters
+  prophet:
+    # Core Prophet settings
+    growth: "linear"                    # 'linear' or 'logistic'
+    changepoint_prior_scale: 0.05       # Flexibility of automatic changepoint selection
+    seasonality_prior_scale: 10.0       # Flexibility of seasonality
+    holidays_prior_scale: 10.0          # Flexibility of holiday effects
+    seasonality_mode: "additive"        # 'additive' or 'multiplicative'
     
-  # LightGBM Parameters
-  lightgbm:
-    objective: "regression"
-    metric: "rmse"
-    boosting_type: "gbdt"
-    num_leaves: 31
-    learning_rate: 0.05
-    feature_fraction: 0.9
-    bagging_fraction: 0.8
-    bagging_freq: 5
-    verbose: -1
-    n_estimators: 100
+    # Seasonality components
+    yearly_seasonality: true            # Capture annual patterns
+    weekly_seasonality: true            # Capture day-of-week patterns  
+    daily_seasonality: false            # Not needed for daily aggregated data
+    
+    # Custom seasonalities
+    custom_seasonalities:
+      monthly:
+        period: 30.5
+        fourier_order: 5
+      quarterly:
+        period: 91.25
+        fourier_order: 3
+    
+    # Uncertainty intervals
+    interval_width: 0.8                 # 80% confidence intervals
+    mcmc_samples: 0                     # Use MAP estimation (faster)
+    
+  # Feature Engineering for Prophet Global Model
+  features:
+    # Prophet requires 'ds' (date) and 'y' (target) columns
+    date_column: "date"
+    target_column: "total_sales"        # or "guest_count"
+    
+    # Global model data preparation
+    aggregation_level: "store_daily"    # Keep store-level granularity for global model
+    
+    # Additional regressors (external variables for global model)
+    regressors:
+      # Promotional and external factors
+      - "promotion_active"              # Promotional periods
+      - "weather_factor"                # Weather impact
+      - "is_weekend"                   # Weekend indicator
+      - "is_holiday"                   # Holiday indicator
+      
+      # Store characteristics (crucial for global model)
+      - "store_type_Urban"             # One-hot encoded store types
+      - "store_type_Suburban"
+      - "store_type_Highway"
+      - "store_type_Mall"
+      - "store_type_Airport"
+      
+      - "region_North"                 # One-hot encoded regions
+      - "region_South"
+      - "region_East"
+      - "region_West"
+      - "region_Central"
+      
+      # Store size/capacity features
+      - "avg_daily_baseline"           # Store baseline capacity
+      - "size_factor"                  # Store size multiplier
+      
+      # Store identifiers for tracking
+      - "store_id_encoded"             # Numerical encoding of store ID
+    
+    # Holiday effects
+    holidays:
+      country: "US"                    # Use US holidays
+      custom_holidays:                 # QSR-specific events
+        - "Super Bowl Sunday"
+        - "Black Friday"
+        - "New Year's Eve"
+    
+  # Multi-store modeling approach
+  modeling_approach: "global"          # Single model for all stores
+  
+  # Global model specific settings
+  global_model:
+    include_store_effects: true        # Model store-specific patterns
+    store_interaction_terms: true     # Allow store-type x seasonality interactions
+    pooling_strategy: "partial"       # Partial pooling across stores
+    min_store_history: 180             # Minimum days of data per store
 
 # MLflow Configuration
 mlflow:
-  experiment_name: "QSR_Sales_Forecasting"
-  model_name: "QSR_LightGBM_Model"
+  # Experiment tracking
+  experiment_name: "QSR_Prophet_Global_Forecasting"
+  
+  # Model registry
+  model_name: "QSR_Prophet_Global_Model"
+  
+  # Tracking server settings
   tracking_uri: "sqlite:///mlflow.db"
   artifact_location: "./mlruns"
-
-# Evaluation Metrics
-evaluation:
-  metrics: ["mae", "mse", "rmse", "mape", "r2"]
   
-# Store Groupings
+  # Run naming convention
+  run_name_prefix: "prophet_global_forecast"
+  
+  # Auto-logging settings
+  autolog: false                       # Prophet requires custom logging
+
+# Evaluation Configuration
+evaluation:
+  # Time series specific metrics
+  metrics: ["mae", "mse", "rmse", "mape", "smape", "mase"]
+  
+  # Prophet-specific evaluation
+  prophet_metrics:
+    - "coverage"                       # Coverage of prediction intervals
+    - "trend_accuracy"                 # How well trend is captured
+    - "seasonality_fit"                # Seasonality component accuracy
+    
+  # Business metrics for global model
+  business_metrics:
+    - "overall_accuracy"               # Chain-wide forecast accuracy
+    - "store_level_accuracy"           # Per-store breakdown
+    - "store_type_accuracy"            # Performance by store type
+    - "region_accuracy"                # Performance by region
+    - "monthly_bias"                   # Monthly forecast bias
+    - "holiday_accuracy"               # Holiday forecasting accuracy
+    
+  # Cross-validation for time series
+  cross_validation:
+    initial: "365 days"                # Initial training period
+    period: "90 days"                  # Frequency of cutoffs
+    horizon: "90 days"                 # Forecast horizon
+    
+  # Store-level evaluation
+  store_evaluation:
+    evaluate_by_store: true            # Break down metrics per store
+    evaluate_by_segment: true          # Evaluate by store segments
+    min_evaluation_days: 30            # Minimum days for store evaluation
+
+# Store Segmentation
 store_groups:
+  # Size categories (based on avg_daily_baseline)
   size:
-    small: [800, 1400]    # baseline range for small stores
-    medium: [1400, 2000]  # baseline range for medium stores  
-    large: [2000, 2500]   # baseline range for large stores
+    small: [800, 1400]                 # Low-volume stores
+    medium: [1400, 2000]               # Mid-volume stores  
+    large: [2000, 2500]                # High-volume stores
+    
+  # Store types
   type: ["Urban", "Suburban", "Highway", "Mall", "Airport"]
+  
+  # Geographic regions
   region: ["North", "South", "East", "West", "Central"]
 
-# Monitoring Configuration
+# Forecasting Configuration
+forecasting:
+  # Forecast horizon
+  horizon_days: 365                    # Forecast 1 year ahead
+  
+  # Prediction intervals
+  prediction_intervals: [0.5, 0.8, 0.95]  # 50%, 80%, 95% confidence
+  
+  # Frequency
+  freq: "D"                            # Daily forecasts
+  
+  # Components to extract
+  components: ["trend", "weekly", "yearly", "holidays"]
+  
+  # Global model forecasting
+  global_forecasting:
+    forecast_all_stores: true          # Generate forecasts for all stores
+    aggregate_forecasts: true          # Also provide chain-level aggregates
+    store_level_intervals: true        # Prediction intervals per store
+
+# Production Monitoring
 monitoring:
-  drift_threshold: 0.05
-  performance_threshold: 0.1
-  alert_email: "data-team@qsr-company.com"
+  # Model performance thresholds
+  performance_thresholds:
+    mape_threshold: 0.15               # 15% MAPE alert threshold
+    smape_threshold: 0.12              # 12% SMAPE threshold
+    coverage_threshold: 0.75           # 75% minimum coverage
+    
+  # Global model specific monitoring
+  global_monitoring:
+    monitor_store_performance: true    # Track individual store accuracy
+    detect_store_outliers: true        # Flag underperforming stores
+    store_drift_threshold: 0.20        # 20% performance degradation per store
+    
+  # Forecast monitoring
+  forecast_monitoring:
+    track_trend_changes: true
+    monitor_seasonality_shift: true
+    alert_on_anomalies: true
+    
+  # Alerting
+  alerts:
+    email: "data-team@qsr-company.com"
+    slack_webhook: null
+    
+  # Retraining triggers
+  retrain_triggers:
+    performance_degradation: 0.10      # Retrain if overall performance drops 10%
+    store_performance_degradation: 0.15 # Retrain if many stores degrade
+    trend_break_detected: true         # Retrain on trend changes
+    schedule: "monthly"                # Regular retraining schedule
+
+# Deployment Configuration
+deployment:
+  # Model serving
+  serving:
+    port: 5000
+    workers: 4
+    timeout: 60                        # Prophet can be slower
+    
+  # Batch forecasting
+  batch:
+    schedule: "daily"                  # Generate forecasts daily
+    forecast_horizon: 30               # 30-day rolling forecasts
+    output_format: "store_level"       # Individual store forecasts
+    
+  # Model stages
+  stages:
+    development: "None"
+    staging: "Staging" 
+    production: "Production"
+    archived: "Archived"
+    
+  # Aliases for easy reference
+  aliases:
+    champion: "production model"
+    challenger: "candidate model"
+    baseline: "benchmark model"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/qsr_prophet_forecasting.log"

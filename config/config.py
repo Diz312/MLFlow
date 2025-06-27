@@ -16,7 +16,7 @@ def load_config(config_path=None):
 
 def get_model_params(config):
     """Extract model parameters from config"""
-    return config['model']['lightgbm']
+    return config['model']['prophet']
 
 def get_feature_config(config):
     """Extract feature engineering config"""
